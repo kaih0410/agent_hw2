@@ -341,6 +341,8 @@ def main():
         print(f"Trajectory: {args.trajectory}")
         print(f"EGA: {activate_EGA}")
         
+        log_records = []  # 儲存所有 Agent 操作紀錄
+
         while it < args.max_iter:
             logging.info(f'Iter: {it}')
             it += 1
@@ -477,6 +479,24 @@ def main():
             # logging.info(gpt_4v_res)
             action_key, info = extract_information(chosen_action)
 
+            # 儲存每一輪 WebAgent 操作
+            answer_content = None
+            if action_key == "answer":
+                answer_content = info.get('content', '')
+
+            log_entry = {
+                "iteration": it,
+                "agent": "WebAgent",
+                "thought": bot_thought,
+                "action": chosen_action,
+                "action_type": action_key,
+                "answer": answer_content,
+                "error_detected": error_exist,
+                "ega_explanation": EGA_explanation if error_exist else ""
+            }
+
+            log_records.append(log_entry)
+
             fail_obs = ""
             pdf_obs = ""
             warn_obs = ""
@@ -572,6 +592,12 @@ def main():
 
         # print_message(messages, task_dir)
         driver_task.quit()
+        
+        # === 寫入整份 JSON 紀錄檔 ===
+        log_path = os.path.join(task_dir, 'agent_log.json')
+        with open(log_path, 'w', encoding='utf-8') as f:
+            json.dump(log_records, f, ensure_ascii=False, indent=2)
+
         logging.info(f'Total cost: {accumulate_prompt_token / 1000 * 0.01 + accumulate_completion_token / 1000 * 0.03}')
 
 
