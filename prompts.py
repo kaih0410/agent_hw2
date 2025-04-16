@@ -18,6 +18,7 @@ Choose from the following valid actions:
 - Click [X]
 - Type [X]; [content] — DO NOT wrap content in quotation marks!
 - Scroll [X or WINDOW]; [up or down]
+- Clear [Numerical_Label]
 - Wait
 - GoBack
 - ANSWER; [final answer]
@@ -29,6 +30,10 @@ Choose from the following valid actions:
 - Reflect on prior steps to make informed decisions.
 - If a checkbox is already selected, avoid clicking it again.
 - Prioritize filter-based reasoning when recommending simulations (before search or scrolling).
+- **Once the filter panel has been closed and simulations are visible, you must:**
+  - **Immediately generate at least one Thought that clicks on a matching simulator.**
+  - **Do NOT generate Thoughts that re-click filters or only scroll endlessly.**
+
 
 ### Action Principles
 - Only one action per step.
@@ -81,10 +86,11 @@ Choose from the following valid actions:
    - Click on a simulator that fits the task (topic + grade).
 
 9. **Complete**
-   - If a simulator screen is loaded (e.g., Play or Reset buttons visible), respond:
-     `ANSWER; Successfully entered [simulator name] simulator`
-   - You do **not** need to click any more buttons (like Play or Reset). Just confirm that the simulator has loaded.
-   - Do **not** reopen the filter panel once a simulator is visible and matched.
+   - If a simulator screen is loaded (e.g., Play or Reset buttons visible) **AND** the Simulation Description [14] has been clicked:
+     - Respond with:
+       `ANSWER; Successfully entered "[Simulation Name]" simulator and reviewed description.`
+   - Do **not** repeat description clicks.
+   - Do **not** click Play or Reset. The task is complete.
 
 If no matching results are found after closing the panel, only then fallback to the main search bar.
 
@@ -98,7 +104,7 @@ Once all user conditions (e.g., grade, keyword/topic) have been selected inside 
 - Do NOT reopen the filter panel.
 - Do NOT re-click or verify checkboxes again.
 
-Instead, randomly choose one of the matching simulations and click it to enter.
+Instead, randomly choose **any one** of the matching simulations and click it to enter.
 After entering the simulation, locate and click the `Simulation Description` button.
 Once the description is loaded, END the task using:
 `ANSWER; Successfully entered "[Simulation Name]" simulator and reviewed description.`
@@ -180,8 +186,9 @@ Refined Logic:
    - DO NOT click SET FILTERS again.
    - INSTEAD: scroll or select matching simulation.
 3. If a matching simulator is visible (based on topic + grade), select it immediately and consider task complete.
-4. If filters are selected and simulations are visible:
-   - Stop interacting with SET FILTERS or checkboxes.
+4. If all filters are selected and simulations are visible:
+   - Do NOT select any Thought that tries to reopen filter panel or re-check checkboxes.
+   - **Prefer Thought that clicks on any visible simulator.**
    - Choose any matching simulator and enter.
    - Once inside, click the `Simulation Description` button.
    - Then, mark the task as complete using `ANSWER; ...`
@@ -206,7 +213,6 @@ You are an error-grounding robot. You will be given a "Thought" of what the exec
 
 Your job is to determine whether the action succeeded or failed based on the result shown in the screenshot. An error occurs if the outcome in the screenshot does not match the intent described in the Thought.
 
-
 You must check not only whether the right element was interacted with, but also verify:
 1. If filters (e.g., grade level, keyword/topic) were intended to be used, are **all required filters selected** as expected (checkboxes checked)?
 2. When using the **SET FILTERS panel**, ensure that the **main page search bar (outside the filter panel)** is empty **before** opening the panel. 
@@ -214,6 +220,7 @@ You must check not only whether the right element was interacted with, but also 
    - The **filter panel's internal search box should remain active** and is used to search for filter keywords.
 3. If the simulation is expected to be displayed, check if the correct one is shown and relevant to the task goal.
 
+Simulation Completion Rule:
 - If the agent has already selected all user-required filters (e.g., grade + keyword), and relevant simulations are shown, the filter process is complete.
 - The agent should now click any matching simulator.
 - After entering the simulator interface, clicking the `Simulation Description` button is the final step.
@@ -226,7 +233,8 @@ You are provided with the following information:
 Thought: {A brief thought of web operation}
 Screenshot: {A screenshot after the operation in the thought}
 
-Your reply should strictly follow the format:
+Your reply must strictly follow this format:
+
 Errors: {Yes/No — Are there any errors?}
-Explanation: {If Yes, explain what the errors are, what likely caused them, and suggest a better action or correction.}
+Explanation: {Only provide explanation if Errors is "Yes". If Errors is "No", do not provide any explanation."}
 """

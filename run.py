@@ -233,6 +233,29 @@ def exec_action_scroll(info, web_eles, driver_task, args, obs_info):
             actions.key_down(Keys.ALT).send_keys(Keys.ARROW_UP).key_up(Keys.ALT).perform()
     time.sleep(3)
 
+def clear_textbox(web_ele, driver_task):
+    try:
+        # 方法一：.clear()（部分網頁不支援）
+        web_ele.clear()
+        time.sleep(0.5)
+        
+        # 方法二：Ctrl+A + Backspace 強制清空
+        actions = ActionChains(driver_task)
+        actions.click(web_ele).perform()
+        time.sleep(0.5)
+
+        if platform.system() == 'Darwin':  # macOS
+            web_ele.send_keys(Keys.COMMAND, 'a')
+        else:  # Windows/Linux
+            web_ele.send_keys(Keys.CONTROL, 'a')
+        time.sleep(0.3)
+        web_ele.send_keys(Keys.BACKSPACE)
+        time.sleep(0.5)
+
+        return True
+    except Exception as e:
+        print(f"[Warning] Failed to clear textbox: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser()
@@ -615,6 +638,24 @@ def main():
                     driver_task.get('https://www.google.com/')
                     time.sleep(2)
 
+                elif action_key == 'clear':
+                    if not args.text_only:
+                        clear_ele_number = int(info['number'])
+                        web_ele = web_eles[clear_ele_number]
+                    else:
+                        clear_ele_number = info['number']
+                        element_box = obs_info[clear_ele_number]['union_bound']
+                        element_box_center = (
+                            element_box[0] + element_box[2] // 2,
+                            element_box[1] + element_box[3] // 2
+                        )
+                        web_ele = driver_task.execute_script(
+                            "return document.elementFromPoint(arguments[0], arguments[1]);",
+                            element_box_center[0], element_box_center[1]
+                        )
+                    # 這個是清除輸入框的內容
+                    clear_textbox(web_ele, driver_task)
+                    
                 # 這個代表結束
                 elif action_key == 'answer':
                     logging.info(info['content'])
