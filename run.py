@@ -13,7 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 
-from prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_TEXT_ONLY, SYSTEM_PREVIOUS_STEP, ERROR_GROUNDING_AGENT_PROMPT
+from prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_TEXT_ONLY, SYSTEM_PREVIOUS_STEP, ERROR_GROUNDING_AGENT_PROMPT, SYSTEM_ORCHESTRATION
 from openai import OpenAI
 from utils import get_web_element_rect, encode_image, extract_information, print_message,\
     get_webarena_accessibility_tree, get_pdf_retrieval_ans_from_assistant, clip_message_and_obs, clip_message_and_obs_text_only
@@ -342,7 +342,7 @@ def main():
         print(f"EGA: {activate_EGA}")
         
         log_records = []  # 儲存所有 Agent 操作紀錄
-
+        orchestrator_logs = [] # 儲存 Orchestrator Agent 的操作紀錄
         while it < args.max_iter:
             logging.info(f'Iter: {it}')
             it += 1
@@ -440,49 +440,93 @@ def main():
                 accumulate_completion_token += completion_tokens
                 logging.info(f'Accumulate Prompt Tokens: {accumulate_prompt_token}; Accumulate Completion Tokens: {accumulate_completion_token}')
                 logging.info('API call complete...')
+            # 取得 GPT-4v 多候選行為輸出
             gpt_4v_res = openai_response.choices[0].message.content
             messages.append({'role': 'assistant', 'content': gpt_4v_res})
-            # print(gpt_4v_res)
 
-            # remove the rects on the website
+            # 移除網頁上的框線
             if (not args.text_only) and rects:
                 logging.info(f"Num of interactive elements: {len(rects)}")
                 for rect_ele in rects:
                     driver_task.execute_script("arguments[0].remove()", rect_ele)
                 rects = []
-                # driver_task.save_screenshot(os.path.join(task_dir, 'screenshot{}_no_box.png'.format(it)))
 
-
-            # extract action info
-            try:
-                assert 'Thought:' in gpt_4v_res and 'Action:' in gpt_4v_res
-            except AssertionError as e:
-                logging.error(e)
-                fail_obs = "Format ERROR: Both 'Thought' and 'Action' should be included in your reply."
+            # === 解析多組 Thought / Action ===
+            thought_action_pairs = re.findall(
+                r'Thought\s*\d*:\s*(.*?)\s*Action\s*\d*:\s*(.*?)(?=(\nThought|\Z))',
+                gpt_4v_res,
+                re.DOTALL
+            )
+            if not thought_action_pairs:
+                logging.error("Cannot find multiple Thought/Action pairs in GPT-4 response.")
+                fail_obs = "Format ERROR: Your reply should include multiple Thought/Action pairs like: Thought 1:..., Action 1:..., etc."
                 continue
-            
-            # print(f"GPT-4v Response: {gpt_4v_res}\n--------")
 
-            bot_thought = re.split(pattern, gpt_4v_res)[1].strip()
-            chosen_action = re.split(pattern, gpt_4v_res)[2].strip()
-            
+            # === 組裝 Orchestrator prompt ===
+            orchestration_prompt = SYSTEM_ORCHESTRATION.strip() + "\n\n"
+            for i, (thought, action, _) in enumerate(thought_action_pairs):
+                orchestration_prompt += f"Thought {i+1}: {thought.strip()}\nAction {i+1}: {action.strip()}\n"
+            orchestration_prompt += f"\nScreenshot: [The screenshot is attached]\nTask Goal: {task['ques']}"
+
+            # === 呼叫 Orchestrator Agent (GPT-4v) 來選最好的 Thought Index ===
+            orchestrator_messages = [
+                {'role': 'system', 'content': SYSTEM_ORCHESTRATION},
+                {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': orchestration_prompt},
+                        {'type': 'image_url', 'image_url': {"url": f"data:image/png;base64,{b64_img}"}}
+                    ]
+                }
+            ]
+            _, _, orchestrator_error, orchestrator_response = call_gpt4v_api(args, client, orchestrator_messages)
+            if orchestrator_error:
+                fail_obs = "Orchestration failed. Please retry."
+                continue
+
+            # === 擷取 Orchestrator 的決策 ===
+            match = re.search(r"Thought Index\s*:\s*(\d+)", orchestrator_response.choices[0].message.content)
+            if not match:
+                fail_obs = "Failed to parse Orchestrator's decision. Please ensure format like: Thought Index:1"
+                continue
+
+            selected_idx = int(match.group(1)) - 1
+            bot_thought = thought_action_pairs[selected_idx][0].strip()
+            chosen_action = thought_action_pairs[selected_idx][1].strip()
+
+            # 顯示與記錄行為
             trajectory_info = f"Thought {bot_thought}\nAction {chosen_action}"
             error_info = f"Error: {error_exist}\nExplanation: {EGA_explanation}"
-                
             if args.trajectory:
                 current_history += trajectory_info
                 if activate_EGA:
                     current_history += error_info
-                
+
             print(f"Step {it}:\n{error_info}\n{trajectory_info}\n----")
-                
-            # logging.info(gpt_4v_res)
+
+            # 提取動作資訊
             action_key, info = extract_information(chosen_action)
+
 
             # 儲存每一輪 WebAgent 操作
             answer_content = None
             if action_key == "answer":
                 answer_content = info.get('content', '')
+
+            orchestration_record = {
+                "iteration": it,
+                "candidates": [
+                    {
+                        "thought": pair[0].strip(),
+                        "action": pair[1].strip()
+                    } for pair in thought_action_pairs
+                ],
+                "selected_index": selected_idx,
+                "selected_thought": bot_thought,
+                "selected_action": chosen_action
+            }
+
+            orchestrator_logs.append(orchestration_record)
 
             log_entry = {
                 "iteration": it,
@@ -584,7 +628,7 @@ def main():
                 logging.error('driver error info:')
                 logging.error(e)
                 if 'element click intercepted' not in str(e):
-                    fail_obs = "The action you have chosen cannot be exected. Please double-check if you have selected the wrong Numerical Label or Action or Action format. Then provide the revised Thought and Action."
+                    fail_obs = "The action you have chosen cannot be executed. Please double-check if you have selected the wrong Numerical Label or Action or Action format. Then provide the revised Thought and Action."
                 else:
                     fail_obs = ""
                 time.sleep(2)
@@ -592,11 +636,13 @@ def main():
 
         # print_message(messages, task_dir)
         driver_task.quit()
-        
         # === 寫入整份 JSON 紀錄檔 ===
         log_path = os.path.join(task_dir, 'agent_log.json')
         with open(log_path, 'w', encoding='utf-8') as f:
-            json.dump(log_records, f, ensure_ascii=False, indent=2)
+            json.dump({
+                "webagent_steps": log_records,
+                "orchestration": orchestrator_logs
+            }, f, ensure_ascii=False, indent=2)
 
         logging.info(f'Total cost: {accumulate_prompt_token / 1000 * 0.01 + accumulate_completion_token / 1000 * 0.03}')
 

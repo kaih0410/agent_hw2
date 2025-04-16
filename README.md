@@ -37,6 +37,7 @@ We use Selenium to build the online web browsing environment.
     ```bash
     conda create -n webvoyager python=3.10
     conda activate webvoyager
+    cd WebVoyager
     pip install -r requirements.txt
     ```
 
